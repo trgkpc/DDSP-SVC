@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.nn.utils import weight_norm
 
 from .pcmer import PCmer
-from diffusion.model_conformer_naive import ConformerNaiveEncoder
+from .. import diffusion
 
 
 
@@ -54,7 +54,7 @@ class Unit2Control(nn.Module):
 
         # transformer
         if use_naive_v2:
-            self.decoder = ConformerNaiveEncoder(
+            self.decoder = diffusion.model_conformer_naive.ConformerNaiveEncoder(
                 num_layers=3,
                 num_heads=8,
                 dim_model=256,

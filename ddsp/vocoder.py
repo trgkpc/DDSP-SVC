@@ -9,7 +9,7 @@ import torchcrepe
 import resampy
 from transformers import HubertModel, Wav2Vec2FeatureExtractor
 from fairseq import checkpoint_utils
-from encoder.hubert.model import HubertSoft
+from .. import encoder
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 from torchaudio.transforms import Resample
 from .unit2control import Unit2Control
@@ -20,7 +20,7 @@ CREPE_RESAMPLE_KERNEL = {}
 F0_KERNEL = {}
 
 class F0_Extractor:
-    def __init__(self, f0_extractor, sample_rate = 44100, hop_size = 512, f0_min = 65, f0_max = 800):
+    def __init__(self, f0_extractor, sample_rate = 44100, hop_size = 512, f0_min = 65, f0_max = 800, ddsp_path='.'):
         self.f0_extractor = f0_extractor
         self.sample_rate = sample_rate
         self.hop_size = hop_size
@@ -33,8 +33,7 @@ class F0_Extractor:
             self.resample_kernel = CREPE_RESAMPLE_KERNEL[key_str]
         if f0_extractor == 'rmvpe':
             if 'rmvpe' not in F0_KERNEL :
-                from encoder.rmvpe import RMVPE
-                F0_KERNEL['rmvpe'] = RMVPE('pretrain/rmvpe/model.pt', hop_length=160)
+                F0_KERNEL['rmvpe'] = encoder.RMVPE(os.path.join(ddsp_path, 'pretrain/rmvpe/model.pt'), hop_length=160)
             self.rmvpe = F0_KERNEL['rmvpe']
         if f0_extractor == 'fcpe':
             self.device_fcpe = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -159,11 +158,12 @@ class Volume_Extractor:
          
 class Units_Encoder:
     def __init__(self, encoder, encoder_ckpt, encoder_sample_rate = 16000, encoder_hop_size = 320, device = None,
-                 cnhubertsoft_gate=10):
+                 cnhubertsoft_gate=10, ddsp_path='.'):
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
         
+        encoder_ckpt = os.path.join(ddsp_path, encoder_ckpt)
         is_loaded_encoder = False
         if encoder == 'hubertsoft':
             self.model = Audio2HubertSoft(encoder_ckpt).to(device)
@@ -229,7 +229,7 @@ class Audio2HubertSoft(torch.nn.Module):
     def __init__(self, path, h_sample_rate = 16000, h_hop_size = 320):
         super().__init__()
         print(' [Encoder Model] HuBERT Soft')
-        self.hubert = HubertSoft()
+        self.hubert = encoder.hubert.model.HubertSoft()
         print(' [Loading] ' + path)
         checkpoint = torch.load(path)
         consume_prefix_in_state_dict_if_present(checkpoint, "module.")

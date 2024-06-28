@@ -4,13 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from nsf_hifigan.nvSTFT import STFT
-from nsf_hifigan.models import load_model,load_config
 from torchaudio.transforms import Resample
-from .diffusion import GaussianDiffusion
-from .wavenet import WaveNet
+
+from .. import nsf_hifigan
+from .. import ddsp
+
 from .naive_v2_diff import NaiveV2Diff
-from ddsp.vocoder import CombSubFast, CombSubSuperFast
+from .wavenet import WaveNet
+from .diffusion import GaussianDiffusion
 
 class DotDict(dict):
     def __getattr__(*args):         
@@ -23,14 +24,15 @@ class DotDict(dict):
 
 def load_model_vocoder(
         model_path,
+        ddsp_abs_path,
         device='cpu'):
     config_file = os.path.join(os.path.split(model_path)[0], 'config.yaml')
     with open(config_file, "r") as config:
         args = yaml.safe_load(config)
     args = DotDict(args)
-    
+
     # load vocoder
-    vocoder = Vocoder(args.vocoder.type, args.vocoder.ckpt, device=device)
+    vocoder = Vocoder(args.vocoder.type, os.path.join(ddsp_abs_path, args.vocoder.ckpt), device=device)
     
     # load model
     if args.model.type == 'Diffusion':
@@ -124,8 +126,8 @@ class NsfHifiGAN(torch.nn.Module):
         self.device = device
         self.model_path = model_path
         self.model = None
-        self.h = load_config(model_path)
-        self.stft = STFT(
+        self.h = nsf_hifigan.load_config(model_path)
+        self.stft = nsf_hifigan.STFT(
                 self.h.sampling_rate, 
                 self.h.num_mels, 
                 self.h.n_fft, 
@@ -150,7 +152,7 @@ class NsfHifiGAN(torch.nn.Module):
     def forward(self, mel, f0):
         if self.model is None:
             print('| Load HifiGAN: ', self.model_path)
-            self.model, self.h = load_model(self.model_path, device=self.device)
+            self.model, self.h = nsf_hifigan.load_model(self.model_path, device=self.device)
         with torch.no_grad():
             c = mel.transpose(1, 2)
             audio = self.model(c, f0)
@@ -161,7 +163,7 @@ class NsfHifiGANLog10(NsfHifiGAN):
     def forward(self, mel, f0):
         if self.model is None:
             print('| Load HifiGAN: ', self.model_path)
-            self.model, self.h = load_model(self.model_path, device=self.device)
+            self.model, self.h = nsf_hifigan.load_model(self.model_path, device=self.device)
         with torch.no_grad():
             c = 0.434294 * mel.transpose(1, 2)
             audio = self.model(c, f0)
@@ -231,7 +233,7 @@ class Unit2Wav(nn.Module):
             n_chans=512,
             pcmer_norm=False):
         super().__init__()
-        self.ddsp_model = CombSubFast(sampling_rate, block_size, n_unit, n_spk, use_pitch_aug, pcmer_norm=pcmer_norm)
+        self.ddsp_model = ddsp.vocoder.CombSubFast(sampling_rate, block_size, n_unit, n_spk, use_pitch_aug, pcmer_norm=pcmer_norm)
         self.diff_model = GaussianDiffusion(WaveNet(out_dims, n_layers, n_chans, 256), out_dims=out_dims)
 
     def forward(self, units, f0, volume, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
@@ -279,7 +281,7 @@ class Unit2WavFast(nn.Module):
             n_layers=6, 
             n_chans=512):
         super().__init__()
-        self.ddsp_model = CombSubSuperFast(sampling_rate, block_size, win_length, n_unit, n_spk, use_pitch_aug)
+        self.ddsp_model = ddsp.vocoder.CombSubFast(sampling_rate, block_size, win_length, n_unit, n_spk, use_pitch_aug)
         self.diff_model = GaussianDiffusion(NaiveV2Diff(mel_channels=out_dims, dim=n_chans, num_layers=n_layers, condition_dim=out_dims, use_mlp=False), out_dims=out_dims)
 
     def forward(self, units, f0, volume, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
