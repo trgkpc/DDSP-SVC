@@ -367,7 +367,7 @@ class DDSP_SVC:
                 current_length = current_length + silent_length + len(seg_output)
         result = torch.from_numpy(result).float()
         result = torchaudio.transforms.Resample(self.args.data.sampling_rate, self.sample_rate)(result)
-        return result
+        return result.numpy()
 
     def load_wav(self, path):
         wav, file_sample_rate = torchaudio.load(path)
@@ -380,12 +380,17 @@ class DDSP_SVC:
     def save_wav(self, ofname, audio):
         # torch.tensor にする
         if type(audio) is np.ndarray:
-            audio = torchaudio.from_numpy(audio)
+            audio = torch.from_numpy(audio).float()
         audio = audio.cpu()
         
         # 2次元にする
         if len(audio.shape) == 1:
             audio = audio.unsqueeze(0)
+
+        # ディレクトリを作る
+        dir_name = os.path.dirname(ofname)
+        if len(dir_name) > 0:
+            os.makedirs(dir_name, exist_ok=True)
 
         torchaudio.save(ofname, audio, self.sample_rate)
 
