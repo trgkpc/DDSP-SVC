@@ -1,5 +1,6 @@
 import os
 import torch
+import torchaudio
 import librosa
 import argparse
 import numpy as np
@@ -245,16 +246,10 @@ class DDSP_SVC:
 
     def __call__(
             self, 
-            ifname, spk_id, key, 
-            ofname=None, 
+            audio, spk_id, key, 
             formant_shift_key=0, diff_spk_id='auto', spk_mix_dict="None",
             speedup='auto', method='auto'
         ):  
-        # load input
-        audio, sample_rate = librosa.load(ifname, sr=None)
-        if len(audio.shape) > 1:
-            audio = librosa.to_mono(audio)
-    
         # extract f0
         f0 = self.pitch_extractor.extract(audio, uv_interp = True, device = self.device)        
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
@@ -321,19 +316,19 @@ class DDSP_SVC:
         input_mel = None
         if self.ddsp_is_not_identified:
             audio_t = torch.from_numpy(audio).float().unsqueeze(0).to(self.device)
-            input_mel = self.vocoder.extract(audio_t, sample_rate)
+            input_mel = self.vocoder.extract(audio_t, self.sample_rate)
             input_mel = torch.cat((input_mel, input_mel[:,-1:,:]), 1)
             
         # forward and save the output
         result = np.zeros(0)
         current_length = 0
-        segments = split(audio, sample_rate, self.hop_size)
+        segments = split(audio, self.sample_rate, self.hop_size)
         print('Cut the input audio into ' + str(len(segments)) + ' slices')
         with torch.no_grad():
             for segment in tqdm(segments):
                 start_frame = segment[0]
                 seg_input = torch.from_numpy(segment[1]).float().unsqueeze(0).to(self.device)
-                seg_units = units_encoder.encode(seg_input, sample_rate, self.hop_size)
+                seg_units = units_encoder.encode(seg_input, self.sample_rate, self.hop_size)
             
                 seg_f0 = f0[:, start_frame : start_frame + seg_units.size(1), :]
                 seg_volume = volume[:, start_frame : start_frame + seg_units.size(1), :]
@@ -370,6 +365,27 @@ class DDSP_SVC:
                 else:
                     result = cross_fade(result, seg_output, current_length + silent_length)
                 current_length = current_length + silent_length + len(seg_output)
-            if ofname is not None:
-                sf.write(ofname, result, self.args.data.sampling_rate)
+        result = torch.from_numpy(result).float()
+        result = torchaudio.transforms.Resample(self.args.data.sampling_rate, self.sample_rate)(result)
+        return result
+
+    def load_wav(self, path):
+        wav, file_sample_rate = torchaudio.load(path)
+        if file_sample_rate != self.sample_rate:
+            wav = torchaudio.transforms.Resample(file_sample_rate, self.sample_rate)(wav)
+        assert len(wav) == 1
+        wav = wav[0]
+        return wav.numpy()
+   
+    def save_wav(self, ofname, audio):
+        # torch.tensor にする
+        if type(audio) is np.ndarray:
+            audio = torchaudio.from_numpy(audio)
+        audio = audio.cpu()
         
+        # 2次元にする
+        if len(audio.shape) == 1:
+            audio = audio.unsqueeze(0)
+
+        torchaudio.save(ofname, audio, self.sample_rate)
+
